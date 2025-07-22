@@ -205,86 +205,93 @@ export const GmailProvider = ({ children }: { children: ReactNode }) => {
       
       console.log('Starting OAuth flow with URL:', authUrl);
       
-      // Try popup first, fallback to redirect if needed
-      const popup = window.open(
-        authUrl,
-        'gmail-oauth',
-        'width=500,height=600,scrollbars=yes,resizable=yes'
-      );
-
-      // If popup is blocked or fails, use redirect flow
-      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        console.log('Using redirect flow for OAuth...');
-        localStorage.setItem('gmail_auth_return_url', window.location.pathname);
-        window.location.href = authUrl;
-        return;
-      }
-
-      // Setup popup monitoring
-      const handleCallback = async (event: MessageEvent) => {
-        if (event.origin !== window.location.origin) return;
-        
-        console.log('Received OAuth callback:', event.data);
-        clearTimeout(timeout);
-        clearInterval(pollTimer);
-
-        if (event.data.type === 'GMAIL_OAUTH_SUCCESS') {
-          await processOAuthSuccess(event.data.code);
-          popup?.close();
-          window.removeEventListener('message', handleCallback);
-        } else if (event.data.type === 'GMAIL_OAUTH_ERROR') {
-          console.error('OAuth error:', event.data.error);
-          handleOAuthError(event.data.error);
-          popup?.close();
-          window.removeEventListener('message', handleCallback);
-        }
-      };
+      // Detect if we're in a popup-friendly environment
+      const isPopupFriendly = window.location.protocol === 'http:' && 
+                             window.location.hostname === 'localhost';
       
-      // Monitor popup closure
-      const pollTimer = setInterval(() => {
-        if (popup?.closed) {
-          clearInterval(pollTimer);
-          clearTimeout(timeout);
-          window.removeEventListener('message', handleCallback);
-          
-          // Check if OAuth was completed via redirect
-          setTimeout(() => {
-            const oauthResult = localStorage.getItem('gmail_oauth_result');
-            if (!oauthResult) {
-              toast({
-                title: 'Authentication Cancelled',
-                description: 'OAuth popup was closed before authentication completed.',
-                variant: 'destructive',
-              });
-            }
-            setIsConnecting(false);
-          }, 1000);
-        }
-      }, 500);
-
-      window.addEventListener('message', handleCallback);
-
-      // Timeout for OAuth process
-      const timeout = setTimeout(() => {
-        console.log('OAuth timeout');
-        clearInterval(pollTimer);
-        toast({
-          title: 'OAuth Timeout',
-          description: 'Google sign-in took too long. Please try again.',
-          variant: 'destructive',
-        });
-        popup?.close();
-        window.removeEventListener('message', handleCallback);
-        setIsConnecting(false);
-      }, 2 * 60 * 1000);
+      if (isPopupFriendly) {
+        // Use popup flow for localhost
+        await handlePopupFlow(authUrl);
+      } else {
+        // Use redirect flow for deployed environments
+        await handleRedirectFlow(authUrl);
+      }
     } catch (error) {
       console.error('OAuth initiation error:', error);
       handleOAuthError(error);
     } finally {
-      // Don't set connecting to false here as it might be handled by callbacks
+      // Will be set to false by success/error handlers
     }
   }, [user, hasCredentials, toast]);
 
+  const handlePopupFlow = async (authUrl: string) => {
+    const popup = window.open(
+      authUrl,
+      'gmail-oauth',
+      'width=500,height=600,scrollbars=yes,resizable=yes'
+    );
+
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      // Popup blocked, fall back to redirect
+      return handleRedirectFlow(authUrl);
+    }
+
+    // Setup popup monitoring
+    const handleCallback = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      
+      console.log('Received OAuth callback:', event.data);
+      cleanup();
+
+      if (event.data.type === 'GMAIL_OAUTH_SUCCESS') {
+        await processOAuthSuccess(event.data.code);
+      } else if (event.data.type === 'GMAIL_OAUTH_ERROR') {
+        handleOAuthError(event.data.error);
+      }
+      popup?.close();
+    };
+    
+    // Monitor popup closure
+    const pollTimer = setInterval(() => {
+      if (popup?.closed) {
+        cleanup();
+        setIsConnecting(false);
+        toast({
+          title: 'Authentication Cancelled',
+          description: 'OAuth popup was closed before authentication completed.',
+          variant: 'destructive',
+        });
+      }
+    }, 500);
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      popup?.close();
+      setIsConnecting(false);
+      toast({
+        title: 'OAuth Timeout',
+        description: 'Google sign-in took too long. Please try again.',
+        variant: 'destructive',
+      });
+    }, 2 * 60 * 1000);
+
+    const cleanup = () => {
+      clearInterval(pollTimer);
+      clearTimeout(timeout);
+      window.removeEventListener('message', handleCallback);
+    };
+
+    window.addEventListener('message', handleCallback);
+  };
+
+  const handleRedirectFlow = async (authUrl: string) => {
+    // Store current path for return
+    localStorage.setItem('gmail_auth_return_url', window.location.pathname);
+    
+    // Redirect to OAuth
+    console.log('Using redirect flow for OAuth...');
+    window.location.href = authUrl;
+  };
   const handleOAuthError = (error: any) => {
     const message = error instanceof Error ? error.message : String(error);
 

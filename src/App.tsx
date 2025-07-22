@@ -37,6 +37,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/auth-callback" element={<AuthCallback />} />
             
             {/* Protected routes */}
             <Route path="/" element={

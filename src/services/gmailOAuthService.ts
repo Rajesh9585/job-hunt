@@ -64,8 +64,11 @@ class GmailOAuthService {
       throw new Error('Credentials not set. Please configure OAuth credentials first.');
     }
 
-    // Use dynamically generated redirect URI
-    const redirectUri = this.currentRedirectUri || `${window.location.origin}/auth-callback.html`;
+    // Use both static HTML and React route for maximum compatibility
+    const isLocalhost = window.location.hostname === 'localhost';
+    const redirectUri = isLocalhost 
+      ? `${window.location.origin}/auth-callback.html`
+      : `${window.location.origin}/auth-callback`;
     
     const params = new URLSearchParams({
       client_id: this.credentials.clientId,
@@ -85,8 +88,11 @@ class GmailOAuthService {
       throw new Error('Credentials not set');
     }
 
-    // Use the same redirect URI that was used for auth
-    const redirectUri = this.currentRedirectUri || `${window.location.origin}/auth-callback.html`;
+    // Use the same redirect URI logic as getAuthUrl
+    const isLocalhost = window.location.hostname === 'localhost';
+    const redirectUri = isLocalhost 
+      ? `${window.location.origin}/auth-callback.html`
+      : `${window.location.origin}/auth-callback`;
 
     console.log('Exchanging code for tokens...', {
       clientId: this.credentials.clientId.substring(0, 20) + '...',
